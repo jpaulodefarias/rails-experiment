@@ -36,6 +36,33 @@ class UsersTest < ActionDispatch::IntegrationTest
     assert response.parsed_body.fetch("fieldErrors").key?("email")
   end
 
+  test "lists users in bounded ID pages" do
+    users = 3.times.map do |index|
+      User.create!(name: "User #{index}", email: "user#{index}@example.com")
+    end
+
+    get "/api/v1/users", params: { limit: 2 }
+    assert_response :ok
+    actual_ids = response.parsed_body.map { |entry| entry.fetch("id") }
+    assert_equal users.first(2).map(&:id), actual_ids
+
+    get "/api/v1/users", params: { limit: 2, after_id: users[1].id }
+    assert_response :ok
+    actual_ids = response.parsed_body.map { |entry| entry.fetch("id") }
+    assert_equal [users[2].id], actual_ids
+  end
+
+  test "rejects invalid pagination parameters" do
+    %w[0 101 abc].each do |limit|
+      get "/api/v1/users", params: { limit: limit }
+      assert_response :bad_request
+      assert_equal "BAD_REQUEST", response.parsed_body.fetch("code")
+    end
+
+    get "/api/v1/users", params: { after_id: "-1" }
+    assert_response :bad_request
+  end
+
   test "returns a bad request when user object is missing" do
     post "/api/v1/users", params: { name: "Ana" }, as: :json
     assert_response :bad_request

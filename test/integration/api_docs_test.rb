@@ -19,5 +19,8 @@ class ApiDocsTest < ActionDispatch::IntegrationTest
     assert_equal "user.events.v1", document.fetch("x-kafka-events").fetch("topic")
     event_actions = document.dig("components", "schemas", "UserEvent", "properties", "action", "enum")
     assert_equal %w[created updated deleted], event_actions
+    list = document.fetch("paths").fetch("/api/v1/users").fetch("get")
+    assert_equal %w[after_id limit], list.fetch("parameters").map { |parameter| parameter.fetch("name") }.sort
+    assert_equal 100, list.fetch("parameters").first.dig("schema", "maximum")
   end
 end

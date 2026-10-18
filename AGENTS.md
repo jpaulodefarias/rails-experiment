@@ -31,7 +31,9 @@ When changing `Gemfile`, run `bundle install` in the container, update `Gemfile.
 - `/health` checks PostgreSQL: it responds with `UP` and 200, or `DOWN` and 503. Log failure details only in the server logs.
 - Avoid logging request bodies, credentials, or secrets. Structured logs must preserve the request ID for correlation.
 - User changes must create events in `user_events` in the same transaction. The `event_dispatcher` publishes pending events to `user.events.v1`; preserve `eventId`, `action`, `occurredAt`, and the `user` snapshot. Delivery is at least once, so consumers must deduplicate by `eventId`.
+- Use Active Record user writes that run callbacks; bulk SQL writes bypass event creation. No-op updates must not create events. Preserve event order per user across concurrent dispatchers and keep failed events pending for retry.
 - Deleting the collection must create one event per user. Invalid requests must not create events. When changing this flow, update model, integration, and publisher tests.
+- Keep `GET /api/v1/users` paginated with `limit` (1–100, default 50) and `after_id` (default 0), returning an ID-ordered JSON array. Reject invalid pagination values with 400.
 
 ## Swagger / OpenAPI
 

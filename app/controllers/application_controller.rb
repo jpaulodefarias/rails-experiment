@@ -2,6 +2,7 @@ class ApplicationController < ActionController::API
   rescue_from StandardError, with: :internal_error
   rescue_from ActiveRecord::RecordNotFound, with: :record_not_found
   rescue_from ActiveRecord::RecordNotUnique, with: :record_not_unique
+  rescue_from ActionController::BadRequest, with: :bad_request
   rescue_from ActionController::ParameterMissing, with: :bad_request
   rescue_from ActionDispatch::Http::Parameters::ParseError, with: :bad_request
 
@@ -17,7 +18,10 @@ class ApplicationController < ActionController::API
     render_error(code: "USER_NOT_FOUND", message: "User was not found", status: :not_found)
   end
 
-  def record_not_unique
+  def record_not_unique(error)
+    constraint = error.cause&.result&.error_field(PG::Result::PG_DIAG_CONSTRAINT_NAME)
+    return internal_error(error) unless constraint == "index_users_on_lower_email"
+
     render_error(code: "EMAIL_ALREADY_EXISTS", message: "Email is already in use", status: :conflict)
   end
 
@@ -26,7 +30,10 @@ class ApplicationController < ActionController::API
   end
 
   def internal_error(error)
-    Rails.logger.error(event: "request_failed", request_id: request.request_id, error: error.class.name)
+    Rails.logger.error(
+      event: "request_failed", request_id: request.request_id,
+      error: error.class.name, backtrace: error.backtrace&.first(5)
+    )
     render_error(code: "INTERNAL_ERROR", message: "Internal server error", status: :internal_server_error)
   end
 end

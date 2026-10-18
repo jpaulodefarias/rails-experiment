@@ -48,6 +48,13 @@ class UserTest < ActiveSupport::TestCase
     assert_equal %w[created], UserEvent.pluck(:action)
   end
 
+  test "does not record an updated event when user details do not change" do
+    user = User.create!(name: "Ana", email: "ana@example.com")
+    user.update!(name: "Ana", email: "ANA@example.com")
+
+    assert_equal %w[created], UserEvent.pluck(:action)
+  end
+
   test "rolls back the event with the user change" do
     User.transaction do
       User.create!(name: "Ana", email: "ana@example.com")

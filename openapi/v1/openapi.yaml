@@ -40,17 +40,36 @@ paths:
   /api/v1/users:
     get:
       tags: [Users]
-      summary: List users in ascending ID order
+      summary: List a page of users in ascending ID order
       operationId: listUsers
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of users to return (default 50).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: after_id
+          in: query
+          description: Return users with an ID greater than this value (default 0).
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
       responses:
         '200':
-          description: A list of users, which may be empty.
+          description: An ID-ordered page of users, which may be empty.
           content:
             application/json:
               schema:
                 type: array
                 items:
                   $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
     post:
       tags: [Users]
       summary: Create a user
@@ -122,7 +141,7 @@ paths:
     put:
       tags: [Users]
       summary: Update the supplied fields of a user
-      description: Records an `updated` event after a successful update.
+      description: Records an `updated` event only when the user's name or email changes.
       operationId: updateUser
       requestBody:
         required: true
@@ -260,7 +279,7 @@ components:
               type: string
   responses:
     BadRequest:
-      description: Malformed JSON or missing user object.
+      description: Malformed JSON, missing user object, or invalid pagination parameters.
       content:
         application/json:
           schema:

@@ -2,19 +2,23 @@ module Api
   module V1
     class UsersController < ApplicationController
       wrap_parameters false
+      DEFAULT_PAGE_SIZE = 50
+      MAX_PAGE_SIZE = 100
 
       def index
-        render json: User.order(:id).map { |user| user_json(user) }
+        limit = pagination_param(:limit, default: DEFAULT_PAGE_SIZE, minimum: 1, maximum: MAX_PAGE_SIZE)
+        after_id = pagination_param(:after_id, default: 0, minimum: 0, maximum: 9_223_372_036_854_775_807)
+        render json: User.where("id > ?", after_id).order(:id).limit(limit).map(&:public_attributes)
       end
 
       def show
-        render json: user_json(User.find(params[:id]))
+        render json: User.find(params[:id]).public_attributes
       end
 
       def create
         user = User.new(user_params)
         if user.save
-          render json: user_json(user), status: :created, location: api_v1_user_path(user)
+          render json: user.public_attributes, status: :created, location: api_v1_user_path(user)
         else
           render_validation_errors(user)
         end
@@ -23,7 +27,7 @@ module Api
       def update
         user = User.find(params[:id])
         if user.update(user_params)
-          render json: user_json(user)
+          render json: user.public_attributes
         else
           render_validation_errors(user)
         end
@@ -45,8 +49,16 @@ module Api
         params.require(:user).permit(:name, :email)
       end
 
-      def user_json(user)
-        user.as_json(only: %i[id name email created_at updated_at])
+      def pagination_param(name, default:, minimum:, maximum:)
+        value = params[name]
+        return default if value.nil?
+
+        raise ActionController::BadRequest unless value.is_a?(String) && value.match?(/\A\d+\z/)
+
+        number = value.to_i
+        raise ActionController::BadRequest unless number.between?(minimum, maximum)
+
+        number
       end
 
       def render_validation_errors(user)

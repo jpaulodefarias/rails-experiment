@@ -24,7 +24,7 @@ When changing dependencies, run `bundle install` and include the updated `Gemfil
 
 ## User events in Kafka
 
-Every successful user creation, update, or deletion writes an event to `user_events` in the same database transaction. Deleting the entire collection writes one `deleted` event for each removed user. Invalid requests do not create events. A separate `event_dispatcher` process publishes pending events to the `user.events.v1` topic. The Kafka key is the user ID as a string, so events for the same user go to the same partition.
+Every successful user creation, meaningful update, or deletion writes an event to `user_events` in the same database transaction. An update that leaves the user's name and email unchanged creates no event. Deleting the entire collection writes one `deleted` event for each removed user. Invalid requests do not create events. A separate `event_dispatcher` process publishes pending events to the `user.events.v1` topic. The Kafka key is the user ID as a string, so events for the same user go to the same partition. User writes must use Active Record methods that run callbacks; bulk SQL methods bypass the outbox.
 
 Example JSON message:
 
@@ -43,9 +43,9 @@ Example JSON message:
 }
 ```
 
-For `deleted` events, `user` contains the last values before deletion. An HTTP response confirms that the user change and its outgoing event were committed to PostgreSQL; it does not confirm Kafka delivery. If the broker is unavailable, the dispatcher retries and the event remains pending. Delivery is **at least once**: a failure after Kafka acknowledges a message but before the event is marked as published can produce a duplicate. Consumers should deduplicate by `eventId`.
+For `deleted` events, `user` contains the last values before deletion. An HTTP response confirms that the user change and its outgoing event were committed to PostgreSQL; it does not confirm Kafka delivery. Failed deliveries stay pending and are retried with exponential backoff, capped at five minutes. A failed event blocks later events for the same user until it succeeds, while other users continue. Delivery is **at least once**: a failure after Kafka acknowledges a message but before the event is marked as published can produce a duplicate. Consumers should deduplicate by `eventId`.
 
-Compose creates the topic and keeps Kafka data in a local volume. To inspect events, run `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic user.events.v1 --from-beginning --formatter-property print.key=true`. Outside Compose, configure the dispatcher with `KAFKA_BOOTSTRAP_SERVERS` and `KAFKA_TOPIC`. In production, create the topic in the managed cluster and run one instance of `bin/dispatch_user_events` as a separate process after migrations. Monitor pending rows in `user_events` and `user_event_delivery_failed` log entries.
+Compose creates the topic and keeps Kafka data in a local volume. To inspect events, run `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic user.events.v1 --from-beginning --formatter-property print.key=true`. Outside Compose, configure the dispatcher with `KAFKA_BOOTSTRAP_SERVERS` and `KAFKA_TOPIC`. In production, create the topic in the managed cluster and run `bin/dispatch_user_events` as a separate process after migrations. Concurrent dispatchers preserve order per user. Monitor pending rows, `attempts`, `next_attempt_at`, and `last_error_class` in `user_events`, as well as `user_event_delivery_failed` and `user_event_stalled` log entries. An event remains pending until it succeeds; investigate stalled events rather than deleting them.
 
 ## HTTP contract
 
@@ -53,14 +53,14 @@ API routes use JSON. `GET /health` checks PostgreSQL and returns `{"status":"UP"
 
 | Method | Route | Result |
 | --- | --- | --- |
-| GET | `/api/v1/users` | Array of users; 200 |
+| GET | `/api/v1/users` | Up to 50 users by default; 200 or 400 |
 | GET | `/api/v1/users/:id` | User; 200 or 404 |
 | POST | `/api/v1/users` | Create a user; 201 or 422 |
 | PUT | `/api/v1/users/:id` | Update the supplied fields; 200, 404, or 422 |
 | DELETE | `/api/v1/users/:id` | Delete a user; 204 or 404 |
 | DELETE | `/api/v1/users` | Delete all users; 204, only in development/test |
 
-Send `{"user":{"name":"Ana","email":"ana@example.com"}}` with POST and PUT. Name and email are required on creation. Email is normalized to lowercase and must be valid and unique regardless of case. User responses contain `id`, `name`, `email`, `created_at`, and `updated_at`; the list is an array ordered by `id`.
+Use `GET /api/v1/users?limit=50&after_id=123` to page through users. `limit` accepts 1–100 and defaults to 50; `after_id` defaults to 0. The response remains an array ordered by `id`. Use the last returned ID as `after_id` for the next page; an empty array ends the scan. Invalid pagination values return 400. Send `{"user":{"name":"Ana","email":"ana@example.com"}}` with POST and PUT. Name and email are required on creation. Email is normalized to lowercase and must be valid and unique regardless of case. User responses contain `id`, `name`, `email`, `created_at`, and `updated_at`.
 
 Errors use `{"code":"VALIDATION_FAILED","message":"User is invalid","traceId":"...","fieldErrors":{"email":["..."]}}`. `fieldErrors` appears for validation failures. Malformed JSON or a missing `user` object returns 400; a missing user or route returns 404; validation failures return 422; a conflict detected by the unique index returns 409; unexpected failures return 500 without internal details. `traceId` matches the Rails request ID.
 
