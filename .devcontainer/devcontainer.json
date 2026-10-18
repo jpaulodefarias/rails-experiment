@@ -1,0 +1,24 @@
+{
+  "name": "Rails Experiment",
+  "dockerComposeFile": ["../compose.yaml", "compose.yaml"],
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "Shopify.ruby-lsp",
+        "jemmyw.rails-fast-nav"
+      ],
+      "settings": {
+        "rubyLsp.rubyVersionManager": {
+          "identifier": "none"
+        },
+        "[ruby]": {
+          "editor.defaultFormatter": "Shopify.ruby-lsp"
+        }
+      }
+    }
+  },
+  "postCreateCommand": "bundle install && bin/rails db:prepare"
+}

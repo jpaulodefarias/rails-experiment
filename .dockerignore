@@ -1,0 +1,8 @@
+.git
+.env*
+log
+tmp
+storage
+vendor/bundle
+coverage
+.ruby-lsp

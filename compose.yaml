@@ -1,0 +1,95 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+      - bundle:/usr/local/bundle
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: rails
+      DB_PASSWORD: rails_local_only
+      DB_NAME: rails_experiment_development
+      RAILS_ENV: development
+      PORT: "3000"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: user.events.v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: bin/rails server -b 0.0.0.0
+  db:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: rails
+      POSTGRES_PASSWORD: rails_local_only
+      POSTGRES_DB: rails_experiment_development
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rails -d rails_experiment_development"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  kafka:
+    image: apache/kafka:4.2.2
+    environment:
+      KAFKA_NODE_ID: "1"
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-broker-api-versions.sh", "--bootstrap-server", "kafka:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+  kafka_init:
+    image: apache/kafka:4.2.2
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: ["/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "user.events.v1", "--partitions", "3", "--replication-factor", "1"]
+  event_dispatcher:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+    working_dir: /workspace
+    volumes:
+      - .:/workspace:cached
+      - bundle:/usr/local/bundle
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_USER: rails
+      DB_PASSWORD: rails_local_only
+      DB_NAME: rails_experiment_development
+      RAILS_ENV: development
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: user.events.v1
+    depends_on:
+      db:
+        condition: service_healthy
+      kafka_init:
+        condition: service_completed_successfully
+    command: bin/dispatch_user_events
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  bundle:
+  kafka_data:

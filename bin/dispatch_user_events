@@ -1,0 +1,9 @@
+#!/usr/bin/env ruby
+require_relative "../config/environment"
+
+publisher = UserEventPublisher.new
+begin
+  UserEventDispatcher.new(publisher: publisher).run
+ensure
+  publisher.close
+end
