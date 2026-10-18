@@ -1,14 +1,14 @@
 # Rails Experiment API
 
-API REST em Rails 8.1, Ruby 3.4 e PostgreSQL 18. O desenho e as decisões iniciais estão em [SDD.md](SDD.md).
+A REST API built with Rails 8.1, Ruby 3.4, and PostgreSQL 18. The original design and decisions are in [SDD.md](SDD.md).
 
-## Desenvolvimento
+## Development
 
-Use VS Code com a extensão Dev Containers e Docker Desktop. Abra a pasta no Dev Container. O Compose inicia a aplicação, o PostgreSQL, o Kafka e o publicador de eventos; o comando de criação prepara o banco. A API fica em `http://localhost:3000`.
+Use VS Code with the Dev Containers extension and Docker Desktop. Open this folder in the Dev Container. Compose starts the application, PostgreSQL, Kafka, and the event dispatcher; the setup command prepares the database. The API is available at `http://localhost:3000`.
 
-O Dev Container instala automaticamente **Ruby LSP** (análise, navegação, formatação e suporte a Rails) e **Rails Fast Nav** (navegação entre arquivos Rails). Após alterar `.devcontainer/devcontainer.json`, execute **Dev Containers: Rebuild Container** no VS Code para instalar as extensões. O Ruby LSP pode criar a pasta local `.ruby-lsp/`, que está ignorada pelo Git.
+The Dev Container automatically installs **Ruby LSP** (analysis, navigation, formatting, and Rails support) and **Rails Fast Nav** (navigation between Rails files). After changing `.devcontainer/devcontainer.json`, run **Dev Containers: Rebuild Container** in VS Code to install the extensions. Ruby LSP may create a local `.ruby-lsp/` directory, which Git ignores.
 
-Pelo terminal do container:
+From a terminal inside the container:
 
 ```sh
 bundle install
@@ -18,15 +18,15 @@ bin/rails test
 bundle exec rubocop
 ```
 
-Sem VS Code, execute `docker compose run --build --rm app bundle install`, depois `docker compose run --rm app bin/rails db:prepare` e então `docker compose up`. Para testes, use `docker compose run --rm app bin/rails test`. Os dados locais ficam no volume `pgdata`. A senha `rails_local_only` serve apenas ao ambiente local.
+Without VS Code, run `docker compose run --build --rm app bundle install`, then `docker compose run --rm app bin/rails db:prepare`, and finally `docker compose up`. To run tests, use `docker compose run --rm app bin/rails test`. Local database data is stored in the `pgdata` volume. The `rails_local_only` password is for local development only.
 
-Ao alterar dependências, execute `bundle install` e inclua o `Gemfile.lock` atualizado no controle de versão. As imagens de desenvolvimento e produção usam esse arquivo para instalações reproduzíveis.
+When changing dependencies, run `bundle install` and include the updated `Gemfile.lock` in version control. The development and production images use this file for reproducible installs.
 
-## Eventos de usuários no Kafka
+## User events in Kafka
 
-Toda criação, atualização ou exclusão bem-sucedida de um usuário registra um evento na tabela `user_events`, na mesma transação do banco. A exclusão da coleção registra um evento `deleted` para cada usuário removido. Requisições inválidas não geram eventos. Um processo `event_dispatcher` publica os eventos pendentes no tópico `user.events.v1`; a chave Kafka é o ID do usuário em texto, mantendo eventos do mesmo usuário na mesma partição.
+Every successful user creation, update, or deletion writes an event to `user_events` in the same database transaction. Deleting the entire collection writes one `deleted` event for each removed user. Invalid requests do not create events. A separate `event_dispatcher` process publishes pending events to the `user.events.v1` topic. The Kafka key is the user ID as a string, so events for the same user go to the same partition.
 
-Exemplo de mensagem JSON:
+Example JSON message:
 
 ```json
 {
@@ -43,35 +43,35 @@ Exemplo de mensagem JSON:
 }
 ```
 
-Para `deleted`, `user` contém os últimos dados antes da exclusão. A resposta HTTP confirma o registro no banco e na fila de saída, não a entrega ao Kafka. Se o broker falhar, o processo tenta novamente e o evento permanece pendente. A entrega é **pelo menos uma vez**: uma falha entre a confirmação do Kafka e a marcação do evento como publicado pode gerar duplicatas. Consumidores devem deduplicar por `eventId`.
+For `deleted` events, `user` contains the last values before deletion. An HTTP response confirms that the user change and its outgoing event were committed to PostgreSQL; it does not confirm Kafka delivery. If the broker is unavailable, the dispatcher retries and the event remains pending. Delivery is **at least once**: a failure after Kafka acknowledges a message but before the event is marked as published can produce a duplicate. Consumers should deduplicate by `eventId`.
 
-O Compose cria o tópico e usa um volume local para os dados do Kafka. Para conferir eventos, execute `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic user.events.v1 --from-beginning --formatter-property print.key=true`. `KAFKA_BOOTSTRAP_SERVERS` e `KAFKA_TOPIC` configuram o publicador fora do Compose. Em produção, execute uma instância de `bin/dispatch_user_events` como processo separado após as migrações e crie o tópico no cluster gerenciado. Monitore eventos pendentes em `user_events` e falhas `user_event_delivery_failed` nos logs.
+Compose creates the topic and keeps Kafka data in a local volume. To inspect events, run `docker compose exec kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server kafka:9092 --topic user.events.v1 --from-beginning --formatter-property print.key=true`. Outside Compose, configure the dispatcher with `KAFKA_BOOTSTRAP_SERVERS` and `KAFKA_TOPIC`. In production, create the topic in the managed cluster and run one instance of `bin/dispatch_user_events` as a separate process after migrations. Monitor pending rows in `user_events` and `user_event_delivery_failed` log entries.
 
-## Contrato HTTP
+## HTTP contract
 
-Todas as rotas usam JSON. `GET /health` consulta o PostgreSQL e retorna `{"status":"UP"}` com 200 ou `{"status":"DOWN"}` com 503. A falha detalhada aparece apenas nos logs.
+API routes use JSON. `GET /health` checks PostgreSQL and returns `{"status":"UP"}` with 200 or `{"status":"DOWN"}` with 503. Detailed failure information appears only in logs.
 
-| Método | Rota | Resultado |
+| Method | Route | Result |
 | --- | --- | --- |
-| GET | `/api/v1/users` | Array de usuários; 200 |
-| GET | `/api/v1/users/:id` | Usuário; 200 ou 404 |
-| POST | `/api/v1/users` | Cria usuário; 201 ou 422 |
-| PUT | `/api/v1/users/:id` | Atualiza os campos enviados; 200, 404 ou 422 |
-| DELETE | `/api/v1/users/:id` | Exclui usuário; 204 ou 404 |
-| DELETE | `/api/v1/users` | Exclui todos; 204, somente em development/test |
+| GET | `/api/v1/users` | Array of users; 200 |
+| GET | `/api/v1/users/:id` | User; 200 or 404 |
+| POST | `/api/v1/users` | Create a user; 201 or 422 |
+| PUT | `/api/v1/users/:id` | Update the supplied fields; 200, 404, or 422 |
+| DELETE | `/api/v1/users/:id` | Delete a user; 204 or 404 |
+| DELETE | `/api/v1/users` | Delete all users; 204, only in development/test |
 
-Envie `{"user":{"name":"Ana","email":"ana@example.com"}}` no POST e PUT. Nome e e-mail são obrigatórios na criação. O e-mail é normalizado para minúsculas e deve ser válido e único, sem distinção de maiúsculas e minúsculas. As respostas de usuário contêm `id`, `name`, `email`, `created_at` e `updated_at`; a listagem usa um array ordenado por `id`.
+Send `{"user":{"name":"Ana","email":"ana@example.com"}}` with POST and PUT. Name and email are required on creation. Email is normalized to lowercase and must be valid and unique regardless of case. User responses contain `id`, `name`, `email`, `created_at`, and `updated_at`; the list is an array ordered by `id`.
 
-Erros usam `{"code":"VALIDATION_FAILED","message":"User is invalid","traceId":"...","fieldErrors":{"email":["..."]}}`. `fieldErrors` aparece nas falhas de validação. JSON malformado ou ausência do objeto `user` gera 400; registro ou rota ausente gera 404; validação gera 422; conflito detectado pelo índice único gera 409; falhas inesperadas geram 500 sem detalhes internos. `traceId` corresponde ao request ID do Rails.
+Errors use `{"code":"VALIDATION_FAILED","message":"User is invalid","traceId":"...","fieldErrors":{"email":["..."]}}`. `fieldErrors` appears for validation failures. Malformed JSON or a missing `user` object returns 400; a missing user or route returns 404; validation failures return 422; a conflict detected by the unique index returns 409; unexpected failures return 500 without internal details. `traceId` matches the Rails request ID.
 
-## Configuração e operação
+## Configuration and operations
 
-`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD` e `DB_NAME` configuram o banco. `PORT`, `RAILS_MAX_THREADS` e `LOG_LEVEL` configuram a aplicação. Em produção, defina também `SECRET_KEY_BASE` por injeção segura de segredo. O Compose fornece apenas credenciais locais.
+`DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME` configure PostgreSQL. `PORT`, `RAILS_MAX_THREADS`, and `LOG_LEVEL` configure the application. In production, also inject `SECRET_KEY_BASE` securely. Compose supplies local credentials only.
 
-Os logs JSON incluem horário, severidade e mensagem; eventos HTTP incluem request ID, método, caminho, status e duração. Não registre corpos de requisições ou credenciais. Em implantação futura, forneça um PostgreSQL gerenciado, execute `bin/rails db:migrate` antes de servir tráfego e monitore `/health` e os logs. A escolha de plataforma, gestão de segredos e publicação estão fora desta entrega.
+JSON logs include time, severity, and message; HTTP events include request ID, method, path, status, and duration. Do not log request bodies or credentials. For a future deployment, provide managed PostgreSQL, run `bin/rails db:migrate` before serving traffic, and monitor `/health` and the logs. Platform selection, secret management, and publishing are outside this project scope.
 
 ## Swagger / OpenAPI
 
-Com a aplicação em execução, abra `http://localhost:3000/api-docs` para explorar e testar as rotas no Swagger UI. A especificação OpenAPI 3.0 está em [openapi/v1/openapi.yaml](openapi/v1/openapi.yaml) e também é servida em `http://localhost:3000/api-docs/v1/openapi.yaml`. A interface usa a origem da própria aplicação, portanto o botão **Try it out** envia requisições para a API local.
+With the application running, open `http://localhost:3000/api-docs` to explore and test routes in Swagger UI. The OpenAPI 3.0 specification is in [openapi/v1/openapi.yaml](openapi/v1/openapi.yaml) and is also served at `http://localhost:3000/api-docs/v1/openapi.yaml`. The UI uses the application's own origin, so **Try it out** sends requests to the local API.
 
-O endpoint `DELETE /api/v1/users`, que apaga a coleção inteira, existe apenas em `development` e `test`; em `production` ele retorna 404.
+`DELETE /api/v1/users`, which removes the entire collection, exists only in `development` and `test`; in `production` it returns 404.
